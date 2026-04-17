@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Poetic Emergence (Autonomous)</title>
+  <style>
+    body { background:#0e0e0e; color:#eaeaea; font-family:monospace; padding:20px; }
+    #text { font-size:22px; margin-bottom:20px; }
+    .log { opacity:0.7; font-size:14px; white-space:pre-line; }
+    button { margin:5px; padding:6px; }
+  </style>
+</head>
+<body>
+
+<h2>Poetic Emergent System</h2>
+<button onclick="start()">Start</button>
+<button onclick="stop()">Stop</button>
+<button onclick="reset()">Reset</button>
+
+<div id="text"></div>
+<div id="log" class="log"></div>
+
+<script>
+
+// =========================
+// CENTRAL CONFIGURATION
+// =========================
+
+const CONFIG = {
+  maxWords: 10,
+  tickDelay: 1200,
+  memoryLimit: 12,
+
+  // persistence
+  storageKey: "poetic-system-state",
+
+  // LLM endpoint (IMPORTANT)
+  // You MUST point this to your own backend proxy
+  // (GitHub secrets are NOT accessible from frontend)
+  apiUrl: "https://your-backend-endpoint.com/api",
+
+  model: "gpt-4o-mini",
+  temperature: 0.8
+};
+
+// =========================
+// AGENT DEFINITIONS
+// =========================
+
+const AGENTS = {
+  A: {
+    name: "Expansion",
+    role: `You expand text poetically.
+- Add imagery
+- Introduce ambiguity
+- Stretch meaning`,
+    allowedActions: ["add", "replace", "noop"]
+  },
+
+  B: {
+    name: "Compression",
+    role: `You reduce text.
+- Remove redundancy
+- Simplify meaning
+- Seek clarity`,
+    allowedActions: ["remove", "replace", "noop"]
+  }
+};
+
+// =========================
+// STATE
+// =========================
+
+let state = {
+  text: "el sonido",
+  memory: [],
+  tick: 0,
+  running: false
+};
+
+// =========================
+// PERSISTENCE
+// =========================
+
+function saveState() {
+  localStorage.setItem(CONFIG.storageKey, JSON.stringify(state));
+}
+
+function loadState() {
+  const saved = localStorage.getItem(CONFIG.storageKey);
+  if (saved) state = JSON.parse(saved);
+}
+
+function reset() {
+  localStorage.removeItem(CONFIG.storageKey);
+  state = { text: "el sonido", memory: [], tick: 0, running: false };
+  render();
+}
+
+// =========================
+// UTILS
+// =========================
+
+function words(t) { return t.split(" ").filter(Boolean); }
+
+function applyAction(action) {
+  let ws = words(state.text);
+
+  if (action.type === "add" && ws.length < CONFIG.maxWords) {
+    ws = ws.concat(words(action.payload));
+  }
+
+  if (action.type === "remove") {
+    ws = ws.filter(w => w !== action.payload);
+  }
+
+  if (action.type === "replace") {
+    ws = ws.map(w => w === action.payload.from ? action.payload.to : w);
+  }
+
+  state.text = ws.join(" ");
+}
+
+function safeParse(str) {
+  try {
+    const json = str.match(/{[\s\S]*}/);
+    return json ? JSON.parse(json[0]) : { type: "noop" };
+  } catch {
+    return { type: "noop" };
+  }
+}
+
+// =========================
+// PROMPT BUILDER
+// =========================
+
+function buildPrompt(agentKey) {
+  const agent = AGENTS[agentKey];
+
+  return `You are a constrained poetic agent.\n\n${agent.role}\n\nCurrent text:\n"${state.text}"\n\nMemory:\n${state.memory.slice(-3).join("\n")}\n\nAllowed actions:\n${agent.allowedActions.join(", ")}\n\nRules:\n- Max ${CONFIG.maxWords} words total
+- Be minimal
+- ONLY JSON output
+\nFormat:\n{\n "type": "add | remove | replace | noop",\n "payload": string OR { "from": string, "to": string }\n}`;
+}
+
+// =========================
+// LLM CALL (via backend)
+// =========================
+
+async function callLLM(prompt) {
+  const res = await fetch(CONFIG.apiUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: CONFIG.model,
+      prompt,
+      temperature: CONFIG.temperature
+    })
+  });
+
+  const data = await res.json();
+  return data.output;
+}
+
+// =========================
+// LOOP
+// =========================
+
+async function step() {
+  state.tick++;
+
+  const aRaw = await callLLM(buildPrompt("A"));
+  const actionA = safeParse(aRaw);
+  applyAction(actionA);
+
+  const bRaw = await callLLM(buildPrompt("B"));
+  const actionB = safeParse(bRaw);
+  applyAction(actionB);
+
+  state.memory.push(state.text);
+  if (state.memory.length > CONFIG.memoryLimit) state.memory.shift();
+
+  saveState();
+  render(actionA, actionB);
+}
+
+async function loop() {
+  while (state.running) {
+    await step();
+    await new Promise(r => setTimeout(r, CONFIG.tickDelay));
+  }
+}
+
+function start() {
+  if (!state.running) {
+    state.running = true;
+    loop();
+  }
+}
+
+function stop() {
+  state.running = false;
+}
+
+// =========================
+// RENDER
+// =========================
+
+function render(a = {type:"-"}, b = {type:"-"}) {
+  document.getElementById("text").innerText = state.text;
+  document.getElementById("log").innerText =
+`tick: ${state.tick}
+
+A (${AGENTS.A.name}) → ${a.type}
+B (${AGENTS.B.name}) → ${b.type}
+
+memory:
+${state.memory.slice(-5).join("\n")}`;
+}
+
+// =========================
+// INIT
+// =========================
+
+loadState();
+render();
+
+</script>
+
+</body>
+</html>
