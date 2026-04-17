@@ -147,12 +147,16 @@ function buildPrompt(agentKey) {
 // LLM CALL (via backend)
 // =========================
 
-async function callLLM() {
-  return JSON.stringify({
-    type: "add",
-    payload: "eco"
+async function callLLM(prompt) {
+  const res = await fetch(CONFIG.apiUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: CONFIG.model,
+      prompt,
+      temperature: CONFIG.temperature
+    })
   });
-}
 
   const data = await res.json();
   return data.output;
