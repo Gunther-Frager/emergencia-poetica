@@ -147,16 +147,12 @@ function buildPrompt(agentKey) {
 // LLM CALL (via backend)
 // =========================
 
-async function callLLM(prompt) {
-  const res = await fetch(CONFIG.apiUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: CONFIG.model,
-      prompt,
-      temperature: CONFIG.temperature
-    })
+async function callLLM() {
+  return JSON.stringify({
+    type: "add",
+    payload: "eco"
   });
+}
 
   const data = await res.json();
   return data.output;
@@ -179,6 +175,18 @@ async function step() {
 
   state.memory.push(state.text);
   if (state.memory.length > CONFIG.memoryLimit) state.memory.shift();
+
+  console.log("----- TICK", state.tick, "-----");
+
+  console.log("TEXT BEFORE:", state.text);
+
+  console.log("A RAW:", aRaw);
+  console.log("A ACTION:", actionA);
+
+  console.log("B RAW:", bRaw);
+  console.log("B ACTION:", actionB);
+
+  console.log("TEXT AFTER:", state.text);
 
   saveState();
   render(actionA, actionB);
