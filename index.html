@@ -44,10 +44,21 @@ const CONFIG = {
 };
 
 // =========================
-// AGENT DEFINITIONS
+// AGENT DEFINITIONS & BEHAVIORS
 // =========================
+// 
+// Cada agente tiene un rol específico con acciones permitidas.
+// El sistema se basa en la creatividad del LLM, no en listas de palabras.
+// Los agentes deben decidir acciones a partir del texto y su rol.
+//
 
 const AGENTS = {
+  
+  // -------- AGENTE A: EXPANSION --------
+  // Rol: expandir el texto poéticamente
+  // Acciones permitidas: add (expandir), replace (transformar), noop (solo si no hay alternativa)
+  // Estrategia: preferir agregar palabras; solo reemplazar si está lleno
+  //
   A: {
     name: "Expansion",
     role: `You expand text poetically.
@@ -57,6 +68,9 @@ const AGENTS = {
     allowedActions: ["add", "replace", "noop"]
   },
 
+  // -------- AGENTE B: COMPRESSION --------
+  // Rol: reducir/simplificar el texto
+  // Acciones permitidas: remove (eliminar), replace (transformar), noop (solo si no hay alternativa)
   B: {
     name: "Compression",
     role: `You reduce text.
@@ -174,65 +188,20 @@ function validateAction(action, agentKey) {
   return action.type === "noop";
 }
 
-const FALLBACK_ADD = ["del viento", "de la noche", "en la bruma", "de luna", "de ceniza", "del silencio"];
-const FALLBACK_REPLACE = [
-  { from: "sonido", to: "rumor" },
-  { from: "viento", to: "mar" },
-  { from: "noche", to: "luz" },
-  { from: "el", to: "un" }
-];
-const FALLBACK_REMOVE = ["el", "la", "un", "una", "de", "del", "y"];
-
-function fallbackAction(agentKey) {
-  const ws = words(state.text);
-
-  if (agentKey === "A") {
-    // Intenta añadir si hay espacio
-    if (ws.length < CONFIG.maxWords) {
-      const candidate = FALLBACK_ADD[Math.floor(Math.random() * FALLBACK_ADD.length)];
-      return { type: "add", payload: candidate };
-    }
-    // Si no hay espacio, intenta reemplazar
-    const replacement = FALLBACK_REPLACE.find(r => ws.includes(r.from));
-    if (replacement) return { type: "replace", payload: replacement };
-    // Si no hay reemplazo posible, fuerza un reemplazo
-    if (ws.length > 0) {
-      return { type: "replace", payload: { from: ws[0], to: "rumor" } };
-    }
-    return { type: "noop" };
-  }
-
-  if (agentKey === "B") {
-    // Intenta remover palabra común
-    const removeWord = ws.find(w => FALLBACK_REMOVE.includes(w));
-    if (removeWord) return { type: "remove", payload: removeWord };
-    // Si hay múltiples palabras, remueve la última
-    if (ws.length > 1) return { type: "remove", payload: ws[ws.length - 1] };
-    // Si solo hay 1 palabra, intenta reemplazarla por algo más corto
-    if (ws.length === 1) return { type: "replace", payload: { from: ws[0], to: "luz" } };
-  }
-
-  return { type: "noop" };
-}
+// =========================
+// ACTION NORMALIZATION
+// =========================
+//
+// No usamos un fallback con palabras predeterminadas.
+// Si el modelo produce algo inválido, conservamos el texto y no cambiamos nada.
+// Esto preserva creatividad y evita anclar el sistema a frases predefinidas.
+//
 
 function normalizeAction(rawAction, agentKey) {
-  // Si es una acción válida y NO es noop, usarla
   if (validateAction(rawAction, agentKey) && rawAction.type !== "noop") {
     return rawAction;
   }
-  // En cualquier otro caso (inválida o noop), usar fallback
-  const fallback = fallbackAction(agentKey);
-  // Si el fallback también es noop, forzar una acción
-  if (fallback.type === "noop") {
-    const ws = words(state.text);
-    if (agentKey === "A" && ws.length < CONFIG.maxWords) {
-      return { type: "add", payload: "de la noche" };
-    }
-    if (agentKey === "B" && ws.length > 0) {
-      return { type: "replace", payload: { from: ws[0], to: "silencio" } };
-    }
-  }
-  return fallback;
+  return { type: "noop" };
 }
 
 // =========================
@@ -258,6 +227,8 @@ Rules:
 - Respond with EXACTLY one JSON object.
 - Do not write explanations, no markdown, no code fences.
 - Resulting text must stay within ${CONFIG.maxWords} words.
+- Do not rely on canned fallback words or explicit hardcoded lists.
+- Decide actions from the current text and the agent's role.
 - Prefer add/replace/remove; use noop only if there is no better valid edit.
 - Keep the system emergent: preserve some coherence while allowing surprise.
 
@@ -272,7 +243,7 @@ JSON schema:
 
 Examples:
 For text "el sonido"
-{ "type": "add", "payload": "del viento" }
+{ "type": "add", "payload": "un susurro" }
 
 For text "el sonido del viento"
 { "type": "replace", "payload": { "from": "viento", "to": "mar" } }
