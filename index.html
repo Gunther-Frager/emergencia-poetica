@@ -187,29 +187,52 @@ function fallbackAction(agentKey) {
   const ws = words(state.text);
 
   if (agentKey === "A") {
+    // Intenta añadir si hay espacio
     if (ws.length < CONFIG.maxWords) {
       const candidate = FALLBACK_ADD[Math.floor(Math.random() * FALLBACK_ADD.length)];
       return { type: "add", payload: candidate };
     }
+    // Si no hay espacio, intenta reemplazar
     const replacement = FALLBACK_REPLACE.find(r => ws.includes(r.from));
     if (replacement) return { type: "replace", payload: replacement };
-    return { type: "add", payload: "de la noche" };
+    // Si no hay reemplazo posible, fuerza un reemplazo
+    if (ws.length > 0) {
+      return { type: "replace", payload: { from: ws[0], to: "rumor" } };
+    }
+    return { type: "noop" };
   }
 
   if (agentKey === "B") {
+    // Intenta remover palabra común
     const removeWord = ws.find(w => FALLBACK_REMOVE.includes(w));
     if (removeWord) return { type: "remove", payload: removeWord };
+    // Si hay múltiples palabras, remueve la última
     if (ws.length > 1) return { type: "remove", payload: ws[ws.length - 1] };
+    // Si solo hay 1 palabra, intenta reemplazarla por algo más corto
+    if (ws.length === 1) return { type: "replace", payload: { from: ws[0], to: "luz" } };
   }
 
   return { type: "noop" };
 }
 
 function normalizeAction(rawAction, agentKey) {
+  // Si es una acción válida y NO es noop, usarla
   if (validateAction(rawAction, agentKey) && rawAction.type !== "noop") {
     return rawAction;
   }
-  return fallbackAction(agentKey);
+  // En cualquier otro caso (inválida o noop), usar fallback
+  const fallback = fallbackAction(agentKey);
+  // Si el fallback también es noop, forzar una acción
+  if (fallback.type === "noop") {
+    const ws = words(state.text);
+    if (agentKey === "A" && ws.length < CONFIG.maxWords) {
+      return { type: "add", payload: "de la noche" };
+    }
+    if (agentKey === "B" && ws.length > 0) {
+      return { type: "replace", payload: { from: ws[0], to: "silencio" } };
+    }
+  }
+  return fallback;
 }
 
 // =========================
