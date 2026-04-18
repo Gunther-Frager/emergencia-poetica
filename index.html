@@ -65,6 +65,10 @@ const AGENTS = {
 - Add imagery
 - Introduce ambiguity
 - Stretch meaning`,
+    rules: `You may add words at the beginning, middle or end of the text.
+- Prefer adding vivid imagery.
+- Replace only when a stronger image or phrase helps.
+- Use noop only if no safe poetic edit is possible.`,
     allowedActions: ["add", "replace", "noop"]
   },
 
@@ -77,6 +81,10 @@ const AGENTS = {
 - Remove redundancy
 - Simplify meaning
 - Seek clarity`,
+    rules: `You may remove or replace words from the beginning, middle or end of the text.
+- Prefer removing weak or redundant words.
+- Replace only when it clarifies meaning.
+- Use noop only if no valid reduction or improvement exists.`,
     allowedActions: ["remove", "replace", "noop"]
   }
 };
@@ -122,9 +130,18 @@ function applyAction(action) {
   if (action.type === "noop") return;
 
   if (action.type === "add") {
-    const added = words(action.payload || "");
+    const payload = typeof action.payload === "string"
+      ? { text: action.payload, position: "end" }
+      : action.payload || { text: "", position: "end" };
+
+    const added = words(payload.text || "");
     if (!added.length) return;
-    state.text = ws.concat(added).slice(0, CONFIG.maxWords).join(" ");
+
+    if (payload.position === "start") {
+      state.text = added.concat(ws).slice(0, CONFIG.maxWords).join(" ");
+    } else {
+      state.text = ws.concat(added).slice(0, CONFIG.maxWords).join(" ");
+    }
     return;
   }
 
@@ -167,9 +184,15 @@ function validateAction(action, agentKey) {
   const availableWords = currentWords.length;
 
   if (action.type === "add") {
-    if (typeof action.payload !== "string") return false;
-    const added = words(action.payload.trim());
-    return added.length > 0 && availableWords + added.length <= CONFIG.maxWords;
+    const payload = typeof action.payload === "string"
+      ? { text: action.payload, position: "end" }
+      : action.payload || {};
+
+    if (typeof payload.text !== "string") return false;
+    const added = words(payload.text.trim());
+    if (!added.length) return false;
+    if (payload.position && !["start", "end"].includes(payload.position)) return false;
+    return availableWords + added.length <= CONFIG.maxWords;
   }
 
   if (action.type === "remove") {
@@ -231,6 +254,7 @@ Rules:
 - Decide actions from the current text and the agent's role.
 - Prefer add/replace/remove; use noop only if there is no better valid edit.
 - Keep the system emergent: preserve some coherence while allowing surprise.
+- ${agent.rules}
 
 Allowed actions:
 ${agent.allowedActions.join("\n")}
@@ -238,12 +262,12 @@ ${agent.allowedActions.join("\n")}
 JSON schema:
 {
   "type": "add" | "remove" | "replace" | "noop",
-  "payload": string OR { "from": string, "to": string }
+  "payload": string OR { "text": string, "position": "start" | "end" } OR { "from": string, "to": string }
 }
 
 Examples:
 For text "el sonido"
-{ "type": "add", "payload": "un susurro" }
+{ "type": "add", "payload": { "text": "un susurro", "position": "start" } }
 
 For text "el sonido del viento"
 { "type": "replace", "payload": { "from": "viento", "to": "mar" } }
