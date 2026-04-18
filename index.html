@@ -105,20 +105,34 @@ function words(t) { return t.split(" ").filter(Boolean); }
 
 function applyAction(action) {
   let ws = words(state.text);
+  if (action.type === "noop") return;
 
-  if (action.type === "add" && ws.length < CONFIG.maxWords) {
-    ws = ws.concat(words(action.payload));
+  if (action.type === "add") {
+    const added = words(action.payload || "");
+    if (!added.length) return;
+    state.text = ws.concat(added).slice(0, CONFIG.maxWords).join(" ");
+    return;
   }
 
   if (action.type === "remove") {
-    ws = ws.filter(w => w !== action.payload);
+    const index = ws.indexOf(action.payload);
+    if (index !== -1) {
+      ws.splice(index, 1);
+    }
+    state.text = ws.join(" ");
+    return;
   }
 
   if (action.type === "replace") {
-    ws = ws.map(w => w === action.payload.from ? action.payload.to : w);
+    let replaced = false;
+    state.text = ws.map(w => {
+      if (!replaced && w === action.payload.from) {
+        replaced = true;
+        return action.payload.to;
+      }
+      return w;
+    }).join(" ");
   }
-
-  state.text = ws.join(" ");
 }
 
 function safeParse(str) {
@@ -130,17 +144,121 @@ function safeParse(str) {
   }
 }
 
+function validateAction(action, agentKey) {
+  if (!action || typeof action !== "object") return false;
+  const agent = AGENTS[agentKey];
+  if (!agent.allowedActions.includes(action.type)) return false;
+
+  const currentWords = words(state.text);
+  const availableWords = currentWords.length;
+
+  if (action.type === "add") {
+    if (typeof action.payload !== "string") return false;
+    const added = words(action.payload.trim());
+    return added.length > 0 && availableWords + added.length <= CONFIG.maxWords;
+  }
+
+  if (action.type === "remove") {
+    return typeof action.payload === "string" && action.payload.trim().length > 0 && currentWords.includes(action.payload);
+  }
+
+  if (action.type === "replace") {
+    if (!action.payload || typeof action.payload !== "object") return false;
+    const from = String(action.payload.from || "").trim();
+    const to = String(action.payload.to || "").trim();
+    if (!from || !to) return false;
+    if (!currentWords.includes(from)) return false;
+    return availableWords - 1 + words(to).length <= CONFIG.maxWords;
+  }
+
+  return action.type === "noop";
+}
+
+const FALLBACK_ADD = ["del viento", "de la noche", "en la bruma", "de luna", "de ceniza", "del silencio"];
+const FALLBACK_REPLACE = [
+  { from: "sonido", to: "rumor" },
+  { from: "viento", to: "mar" },
+  { from: "noche", to: "luz" },
+  { from: "el", to: "un" }
+];
+const FALLBACK_REMOVE = ["el", "la", "un", "una", "de", "del", "y"];
+
+function fallbackAction(agentKey) {
+  const ws = words(state.text);
+
+  if (agentKey === "A") {
+    if (ws.length < CONFIG.maxWords) {
+      const candidate = FALLBACK_ADD[Math.floor(Math.random() * FALLBACK_ADD.length)];
+      return { type: "add", payload: candidate };
+    }
+    const replacement = FALLBACK_REPLACE.find(r => ws.includes(r.from));
+    if (replacement) return { type: "replace", payload: replacement };
+    return { type: "add", payload: "de la noche" };
+  }
+
+  if (agentKey === "B") {
+    const removeWord = ws.find(w => FALLBACK_REMOVE.includes(w));
+    if (removeWord) return { type: "remove", payload: removeWord };
+    if (ws.length > 1) return { type: "remove", payload: ws[ws.length - 1] };
+  }
+
+  return { type: "noop" };
+}
+
+function normalizeAction(rawAction, agentKey) {
+  if (validateAction(rawAction, agentKey) && rawAction.type !== "noop") {
+    return rawAction;
+  }
+  return fallbackAction(agentKey);
+}
+
 // =========================
 // PROMPT BUILDER
 // =========================
 
 function buildPrompt(agentKey) {
   const agent = AGENTS[agentKey];
+  const memory = state.memory.slice(-3).map((line, index) => `${index + 1}. ${line}`).join("\n") || "none";
 
-  return `You are a constrained poetic agent.\n\n${agent.role}\n\nCurrent text:\n"${state.text}"\n\nMemory:\n${state.memory.slice(-3).join("\n")}\n\nAllowed actions:\n${agent.allowedActions.join(", ")}\n\nRules:\n- Max ${CONFIG.maxWords} words total
-- Be minimal
-- ONLY JSON output
-\nFormat:\n{\n "type": "add | remove | replace | noop",\n "payload": string OR { "from": string, "to": string }\n}`;
+  return `You are a constrained poetic editor. You do not write full poetry yourself; you select a single edit action to transform the shared text.
+
+Role:
+${agent.role}
+
+Current text:
+"${state.text}"
+
+Recent memory:
+${memory}
+
+Rules:
+- Respond with EXACTLY one JSON object.
+- Do not write explanations, no markdown, no code fences.
+- Resulting text must stay within ${CONFIG.maxWords} words.
+- Prefer add/replace/remove; use noop only if there is no better valid edit.
+- Keep the system emergent: preserve some coherence while allowing surprise.
+
+Allowed actions:
+${agent.allowedActions.join("\n")}
+
+JSON schema:
+{
+  "type": "add" | "remove" | "replace" | "noop",
+  "payload": string OR { "from": string, "to": string }
+}
+
+Examples:
+For text "el sonido"
+{ "type": "add", "payload": "del viento" }
+
+For text "el sonido del viento"
+{ "type": "replace", "payload": { "from": "viento", "to": "mar" } }
+
+For text "el sonido mar"
+{ "type": "remove", "payload": "el" }
+
+Output:
+`;
 }
 
 // =========================
@@ -168,32 +286,32 @@ async function callLLM(prompt) {
 
 async function step() {
   state.tick++;
+  const beforeText = state.text;
 
   const aRaw = await callLLM(buildPrompt("A"));
-  const actionA = safeParse(aRaw);
+  const actionA = normalizeAction(safeParse(aRaw), "A");
   applyAction(actionA);
+  const afterA = state.text;
 
   const bRaw = await callLLM(buildPrompt("B"));
-  const actionB = safeParse(bRaw);
+  const actionB = normalizeAction(safeParse(bRaw), "B");
   applyAction(actionB);
+  const afterB = state.text;
 
   state.memory.push(state.text);
   if (state.memory.length > CONFIG.memoryLimit) state.memory.shift();
 
   console.log("----- TICK", state.tick, "-----");
-
-  console.log("TEXT BEFORE:", state.text);
-
+  console.log("TEXT BEFORE:", beforeText);
   console.log("A RAW:", aRaw);
   console.log("A ACTION:", actionA);
-
+  console.log("AFTER A:", afterA);
   console.log("B RAW:", bRaw);
   console.log("B ACTION:", actionB);
-
-  console.log("TEXT AFTER:", state.text);
+  console.log("TEXT AFTER:", afterB);
 
   saveState();
-  render(actionA, actionB);
+  render(actionA, actionB, beforeText, afterA, afterB, aRaw, bRaw);
 }
 
 async function loop() {
@@ -218,13 +336,28 @@ function stop() {
 // RENDER
 // =========================
 
-function render(a = {type:"-"}, b = {type:"-"}) {
+function render(a = {type:"-"}, b = {type:"-"}, before = "", afterA = "", afterB = "", aRaw = "", bRaw = "") {
   document.getElementById("text").innerText = state.text;
   document.getElementById("log").innerText =
 `tick: ${state.tick}
 
 A (${AGENTS.A.name}) → ${a.type}
 B (${AGENTS.B.name}) → ${b.type}
+
+before:
+${before}
+
+after A:
+${afterA}
+
+after B:
+${afterB}
+
+raw A:
+${aRaw}
+
+raw B:
+${bRaw}
 
 memory:
 ${state.memory.slice(-5).join("\n")}`;
