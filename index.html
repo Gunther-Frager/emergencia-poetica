@@ -253,6 +253,7 @@ Rules:
 - Do not rely on canned fallback words or explicit hardcoded lists.
 - Decide actions from the current text and the agent's role.
 - Prefer add/replace/remove; use noop only if there is no better valid edit.
+- Avoid noop when a valid add/remove/replace exists.
 - Keep the system emergent: preserve some coherence while allowing surprise.
 - ${agent.rules}
 
@@ -277,6 +278,55 @@ For text "el sonido mar"
 
 Output:
 `;
+}
+
+function buildRetryPrompt(agentKey) {
+  const agent = AGENTS[agentKey];
+  const memory = state.memory.slice(-3).map((line, index) => `${index + 1}. ${line}`).join("\n") || "none";
+
+  return `You are a constrained poetic editor revising your previous choice. You must choose a valid edit action other than noop whenever possible.
+
+Role:
+${agent.role}
+
+Current text:
+"${state.text}"
+
+Recent memory:
+${memory}
+
+Rules:
+- Respond with EXACTLY one JSON object.
+- Do not write explanations, no markdown, no code fences.
+- Resulting text must stay within ${CONFIG.maxWords} words.
+- Do not rely on canned fallback words or explicit hardcoded lists.
+- If a valid add/remove/replace exists, do not choose noop.
+- Prefer adding when text has space, and preferring removal or replacement when it can improve clarity.
+- ${agent.rules}
+
+Allowed actions:
+${agent.allowedActions.join("\n")}
+
+JSON schema:
+{
+  "type": "add" | "remove" | "replace" | "noop",
+  "payload": string OR { "text": string, "position": "start" | "end" } OR { "from": string, "to": string }
+}
+
+Output:
+`;
+}
+
+async function askAgentAction(agentKey) {
+  const raw = await callLLM(buildPrompt(agentKey));
+  const action = normalizeAction(safeParse(raw), agentKey);
+  if (action.type !== "noop") {
+    return { raw, action };
+  }
+
+  const retryRaw = await callLLM(buildRetryPrompt(agentKey));
+  const retryAction = normalizeAction(safeParse(retryRaw), agentKey);
+  return { raw: retryRaw, action: retryAction.type === "noop" ? action : retryAction };
 }
 
 // =========================
@@ -306,13 +356,11 @@ async function step() {
   state.tick++;
   const beforeText = state.text;
 
-  const aRaw = await callLLM(buildPrompt("A"));
-  const actionA = normalizeAction(safeParse(aRaw), "A");
+  const { raw: aRaw, action: actionA } = await askAgentAction("A");
   applyAction(actionA);
   const afterA = state.text;
 
-  const bRaw = await callLLM(buildPrompt("B"));
-  const actionB = normalizeAction(safeParse(bRaw), "B");
+  const { raw: bRaw, action: actionB } = await askAgentAction("B");
   applyAction(actionB);
   const afterB = state.text;
 
