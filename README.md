@@ -1,50 +1,59 @@
 # emergencia-poetica-local
 
-Proyecto local dividido en backend/frontend para experimentar con emergencia poética.
+Versión local completa separada en `backend/` y `frontend/`, preparada para usar LLM por internet con proveedor intercambiable: **OpenAI**, **Gemini** o **mock**.
 
 ## Estructura
 
-- `backend/`: API local en Node + Express.
-- `frontend/`: interfaz HTML/JS simple.
+- `backend/` API Node/Express + estado persistente en `state.json`.
+- `frontend/` UI estática simple.
 
-## Requisitos
-
-- Node.js 18+
-
-## Ejecutar backend
+## Backend: instalación
 
 ```bash
 cd backend
 npm install
+cp .env.example .env
+```
+
+Edita `.env`:
+
+- `LLM_PROVIDER=openai` o `gemini` o `mock`
+- `OPENAI_API_KEY=...` (si openai)
+- `GEMINI_API_KEY=...` (si gemini)
+
+Inicia:
+
+```bash
 npm run dev
 ```
 
-Servidor en `http://localhost:8787`.
-
-## Ejecutar frontend
-
-Abrir `frontend/index.html` en el navegador.
-
-## Endpoints backend
+## Endpoints
 
 - `GET /health`
 - `GET /state`
 - `POST /init`
 - `POST /cycle`
 
-### Ejemplo ciclo
+### `POST /cycle`
+Puedes forzar proveedor por request:
 
 ```bash
-curl -X POST "http://localhost:8787/cycle" \
+curl -X POST http://localhost:8787/cycle \
   -H "Content-Type: application/json" \
-  -d '{"new_verse":"Arde la lluvia sobre el vidrio azul"}'
+  -d '{"provider":"openai"}'
 ```
 
-## Reglas implementadas
+Valores posibles: `openai`, `gemini`, `mock`.
 
-- 20 versos máximo.
-- 10 palabras máximo por verso.
-- 1 expansión por ciclo.
-- 1 poda por ciclo.
-- archivo de descartes (`discard_file`).
-- reaparición ocasional (~20%).
+## Reglas del ciclo
+
+- 20 versos máximo
+- 10 palabras máximo por verso
+- 1 expansión por ciclo
+- 1 poda por ciclo
+- archivo de descartes (`discard_file`)
+- reaparición ocasional (configurable con `REAPPEAR_PROBABILITY`)
+
+## Frontend
+
+Abre `frontend/index.html` en el navegador. Botón de ciclo usa el backend local en `http://localhost:8787`.
