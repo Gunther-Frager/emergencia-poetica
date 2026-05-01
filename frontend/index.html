@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Emergencia Poética (Local)</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <h1>Emergencia Poética (Local)</h1>
+
+  <label for="provider">Proveedor LLM:</label>
+  <select id="provider">
+    <option value="openai">openai</option>
+    <option value="gemini">gemini</option>
+    <option value="mock">mock</option>
+  </select>
+
+  <button id="runCycle">Ejecutar ciclo</button>
+  <button id="refresh">Refrescar estado</button>
+
+  <pre id="output"></pre>
+
+  <script src="./app.js"></script>
+</body>
+</html>
